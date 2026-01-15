@@ -48,7 +48,11 @@ class NotionClient:
             if not response["results"]:
                 return None
             
-            last_entry_date_str = response["results"][0]["properties"][timestamp_col_name]["date"]["start"]
+            date_prop = response["results"][0]["properties"][timestamp_col_name].get("date")
+            if not date_prop or not date_prop.get("start"):
+                return None
+            
+            last_entry_date_str = date_prop["start"]
             # Convert ISO 8601 string to datetime object, then to UTC timestamp
             dt = datetime.fromisoformat(last_entry_date_str)
             return int(dt.timestamp() * 1000)

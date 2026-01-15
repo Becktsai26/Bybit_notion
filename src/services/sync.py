@@ -18,105 +18,83 @@ class SyncService:
 
     def run_sync(self):
         """
-        Runs the main synchronization logic.
-        - Determines the time window for fetching data.
-        - Fetches data for the main account and all subaccounts.
-        - Processes and transforms the data.
-        - Writes the new data to Notion.
+        Runs the main synchronization logic with support for multi-window fetching.
         """
         log.info("Starting synchronization process...")
         
         # 1. Determine the time window
-        last_sync_ms = self.notion.get_last_sync_timestamp()
-        if last_sync_ms:
-            # Start from the second after the last sync to avoid duplicates
-            start_time_ms = last_sync_ms + 1
-        else:
-            # If DB is empty, fetch last 7 days (Bybit's limit for execution records)
-            start_time_ms = int((datetime.now(timezone.utc) - timedelta(days=7)).timestamp() * 1000)
-            log.info("No previous sync found. Fetching data for the last 7 days.")
+        # User requested backfill from 2026-01-01
+        start_time_ms = int(datetime(2026, 1, 1, tzinfo=timezone.utc).timestamp() * 1000)
+        log.info(f"Forcing start date to: {datetime.fromtimestamp(start_time_ms/1000, tz=timezone.utc)}")
         
         end_time_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
 
-        # 2. Get accounts to sync (main + subaccounts)
-        # The main account is handled by the default adapter instance.
-        # We need to create new adapter instances for subaccounts if credentials differ,
-        # but Bybit's API allows querying subaccount data with a Master Key.
-        # For this implementation, we assume a Master Key with subaccount permissions.
-        
-        # For now, let's simplify and only use the main account provided.
-        # Sub-account iteration logic can be complex due to credential management.
-        # We will log a placeholder for this functionality.
-        log.warning("Note: Subaccount iteration is not fully implemented in this version. Syncing main account only.")
+        # 2. Skip subaccount notice for brevity
+        log.warning("Note: Syncing main account only.")
 
-        # 3. Fetch data from Bybit
-        log.info(f"Fetching data from {datetime.fromtimestamp(start_time_ms/1000)} to {datetime.fromtimestamp(end_time_ms/1000)}")
+        # 3. Fetch data from Bybit in 7-day chunks (API limit)
+        all_transactions = []
+        current_start = start_time_ms
         
-        # Fetch executions (trades)
-        executions = self.exchange.fetch_executions(category="linear", start_time=start_time_ms, end_time=end_time_ms)
-        
-        # Fetch transaction log (for funding fees, etc.)
-        transactions = self.exchange.fetch_transaction_log(
-            account_type="UNIFIED", 
-            category="linear", 
-            start_time=start_time_ms, 
-            end_time=end_time_ms
-        )
+        while current_start < end_time_ms:
+            # 7 days max per request
+            current_end = min(current_start + (7 * 24 * 60 * 60 * 1000) - 1, end_time_ms)
+            
+            log.info(f"Fetching chunk from {datetime.fromtimestamp(current_start/1000, tz=timezone.utc)} to {datetime.fromtimestamp(current_end/1000, tz=timezone.utc)}")
+            
+            try:
+                chunk_txs = self.exchange.fetch_transaction_log(
+                    account_type="UNIFIED", 
+                    category="linear", 
+                    start_time=int(current_start), 
+                    end_time=int(current_end)
+                )
+                all_transactions.extend(chunk_txs)
+            except Exception as e:
+                log.error(f"Error fetching chunk: {e}")
+                break
+                
+            current_start = current_end + 1
 
-        log.info(f"Found {len(executions)} new executions and {len(transactions)} new transactions.")
+        log.info(f"Total transactions retrieved: {len(all_transactions)}")
 
         # 4. Process and transform data
         notion_records = []
+        pnl_threshold = 0.5 # Filter out tiny amounts (often residuals or funding-like dust)
         
-        # Process executions
-        for exec_record in executions:
-            # Filter out records that are somehow older than our start time
-            exec_time_ms = int(exec_record.get("execTime"))
-            if exec_time_ms < start_time_ms:
+        for tx_record in all_transactions:
+            if tx_record.get("type") != "TRADE":
+                continue
+                
+            change = float(tx_record.get("change", 0.0))
+            fee = float(tx_record.get("fee", 0.0))
+            pnl = change + fee
+            
+            # Filter non-zero and above threshold
+            if abs(pnl) < pnl_threshold:
                 continue
 
             record = {
-                "symbol": exec_record.get("symbol"),
-                "side": exec_record.get("side"),
-                "size": float(exec_record.get("execQty")),
-                "price": float(exec_record.get("execPrice")),
-                "fee": float(exec_record.get("execFee")),
-                "pnl": float(exec_record.get("closedPnl", 0.0)),
-                "timestamp": exec_time_ms,
-                "subaccount": "Main Account" # Placeholder
+                "symbol": tx_record.get("symbol"),
+                "side": tx_record.get("side"),
+                "size": float(tx_record.get("qty", 0.0)),
+                "price": float(tx_record.get("tradePrice", 0.0)),
+                "fee": fee,
+                "pnl": pnl,
+                "timestamp": int(tx_record.get("transactionTime")),
+                "subaccount": "Main Account"
             }
             notion_records.append(record)
 
-        # Process funding fees from transaction log
-        for tx_record in transactions:
-            tx_time_ms = int(tx_record.get("transactionTime"))
-            if tx_time_ms < start_time_ms:
-                continue
-            
-            if tx_record.get("type") == "FUNDING":
-                record = {
-                    "symbol": tx_record.get("symbol"),
-                    "side": "Funding", # Special side for funding
-                    "size": None,
-                    "price": None,
-                    "fee": float(tx_record.get("change")), # Funding is treated as a fee/gain
-                    "pnl": float(tx_record.get("change")),
-                    "timestamp": tx_time_ms,
-                    "subaccount": "Main Account" # Placeholder
-                }
-                notion_records.append(record)
-
-        # Sort all records by timestamp before writing
+        # Sort all records by timestamp
         notion_records.sort(key=lambda r: r['timestamp'])
         
         if not notion_records:
-            log.info("No new records to sync.")
+            log.info("No records matching the filter were found.")
             return
 
-        log.info(f"Processed {len(notion_records)} new records to be written to Notion.")
+        log.info(f"Processed {len(notion_records)} records (PnL > {pnl_threshold}) to be written to Notion.")
         
         # 5. Write to Notion
         self.notion.create_records(notion_records)
-
         log.info("Synchronization process completed successfully.")
-
