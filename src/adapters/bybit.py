@@ -151,3 +151,14 @@ class BybitAdapter(BaseExchangeAdapter):
             # We'll log this as a warning instead of a critical failure.
             log.warning(f"Could not fetch subaccounts. API key may lack permissions. Error: {e}")
             return []
+
+    def get_positions(self, category: str, settleCoin: str = "USDT") -> List[Dict[str, Any]]:
+        """
+        Fetches current positions for the account.
+        """
+        endpoint = "/v5/position/list"
+        params = {
+            "category": category,
+            "settleCoin": settleCoin
+        }
+        return self._paginated_fetch(endpoint, params)

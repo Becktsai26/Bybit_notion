@@ -118,3 +118,29 @@
 2026-01-18 17:25:23 - SyncServiceLogger - INFO - Successfully created record in Notion for symbol: BTCUSDT
 2026-01-18 17:25:24 - SyncServiceLogger - INFO - Successfully created record in Notion for symbol: BTCUSDT
 2026-01-18 17:25:25 - SyncServiceLogger - INFO - Synchronization process completed successfully.
+2026-01-18 18:05:34 - SyncServiceLogger - INFO - -----------------------------------------
+2026-01-18 18:05:34 - SyncServiceLogger - INFO - --- Bybit to Notion Sync Service ---
+2026-01-18 18:05:34 - SyncServiceLogger - INFO - -----------------------------------------
+2026-01-18 18:05:34 - SyncServiceLogger - INFO - Initializing Bybit and Notion clients for sync...
+2026-01-18 18:05:34 - SyncServiceLogger - INFO - Starting synchronization process...
+2026-01-18 18:05:35 - SyncServiceLogger - INFO - No previous sync found. Forcing start date to: 2026-01-01 00:00:00+00:00
+2026-01-18 18:05:35 - SyncServiceLogger - WARNING - Note: Syncing main account only.
+2026-01-18 18:05:35 - SyncServiceLogger - INFO - Fetching chunk from 2026-01-01 00:00:00+00:00 to 2026-01-07 23:59:59.999000+00:00
+2026-01-18 18:05:36 - SyncServiceLogger - INFO - Fetching chunk from 2026-01-08 00:00:00+00:00 to 2026-01-14 23:59:59.999000+00:00
+2026-01-18 18:05:38 - SyncServiceLogger - INFO - Fetching chunk from 2026-01-15 00:00:00+00:00 to 2026-01-18 10:05:35.211000+00:00
+2026-01-18 18:05:39 - SyncServiceLogger - INFO - Total transactions retrieved: 205
+2026-01-18 18:05:39 - SyncServiceLogger - INFO - Processed 13 records (PnL > 0.5) to be written to Notion.
+2026-01-18 18:05:40 - SyncServiceLogger - INFO - Successfully created record in Notion for symbol: ETHUSDT
+2026-01-18 18:05:41 - SyncServiceLogger - INFO - Successfully created record in Notion for symbol: BTCUSDT
+2026-01-18 18:05:42 - SyncServiceLogger - INFO - Successfully created record in Notion for symbol: BTCUSDT
+2026-01-18 18:05:43 - SyncServiceLogger - INFO - Successfully created record in Notion for symbol: ZECUSDT
+2026-01-18 18:05:43 - SyncServiceLogger - INFO - Successfully created record in Notion for symbol: BTCUSDT
+2026-01-18 18:05:45 - SyncServiceLogger - INFO - Successfully created record in Notion for symbol: BTCUSDT
+2026-01-18 18:05:46 - SyncServiceLogger - INFO - Successfully created record in Notion for symbol: BTCUSDT
+2026-01-18 18:05:46 - SyncServiceLogger - INFO - Successfully created record in Notion for symbol: BTCUSDT
+2026-01-18 18:05:48 - SyncServiceLogger - INFO - Successfully created record in Notion for symbol: BTCUSDT
+2026-01-18 18:05:49 - SyncServiceLogger - INFO - Successfully created record in Notion for symbol: BTCUSDT
+2026-01-18 18:05:53 - SyncServiceLogger - INFO - Successfully created record in Notion for symbol: KAITOUSDT
+2026-01-18 18:05:54 - SyncServiceLogger - INFO - Successfully created record in Notion for symbol: BTCUSDT
+2026-01-18 18:05:55 - SyncServiceLogger - INFO - Successfully created record in Notion for symbol: BTCUSDT
+2026-01-18 18:05:55 - SyncServiceLogger - INFO - Synchronization process completed successfully.
