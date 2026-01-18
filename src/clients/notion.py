@@ -94,11 +94,46 @@ class NotionClient:
     def create_records(self, records: List[Dict[str, Any]]):
         """
         Creates new pages in the Notion database for each record.
+        Includes deduplication based on 'Transaction ID'.
 
         Args:
             records: A list of dictionaries, where each dict represents a trade/transaction.
         """
-        for record in records:
+        if not records:
+            return
+
+        # Deduplication Step 1: Fetch recent IDs from Notion to avoid duplicates
+        # We fetch the last 100 records (enough for most overlapping sync windows)
+        existing_ids = set()
+        try:
+            response = self.client.databases.query(
+                database_id=self.database_id,
+                sorts=[{"property": "Timestamp", "direction": "descending"}],
+                page_size=100
+            )
+            for page in response.get("results", []):
+                try:
+                    # Extract Rich Text content safely
+                    id_prop = page["properties"].get("Transaction ID", {}).get("rich_text", [])
+                    if id_prop:
+                        existing_ids.add(id_prop[0]["plain_text"])
+                except (KeyError, IndexError):
+                    continue
+        except APIResponseError as e:
+            log.warning(f"Failed to fetch existing IDs for deduplication: {e}. Proceeding without deduplication.")
+        
+        # Deduplication Step 2: Filter input records
+        unique_records = [r for r in records if r.get("id") and r.get("id") not in existing_ids]
+        
+        duplicates_count = len(records) - len(unique_records)
+        if duplicates_count > 0:
+            log.info(f"Skipped {duplicates_count} duplicate records found in Notion.")
+        
+        if not unique_records:
+            log.info("No new unique records to create.")
+            return
+
+        for record in unique_records:
             properties = self._map_to_notion_properties(record)
             try:
                 self.client.pages.create(
@@ -144,6 +179,9 @@ class NotionClient:
             "Timestamp": {"date": {"start": timestamp_iso}},
             "Subaccount": {
                 "rich_text": [{"type": "text", "text": {"content": record.get("subaccount", "Main Account")}}]
+            },
+            "Transaction ID": {
+                "rich_text": [{"type": "text", "text": {"content": record.get("id", "")}}]
             },
         }
         # Notion API does not accept None for number fields.

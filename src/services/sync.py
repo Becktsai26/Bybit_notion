@@ -23,9 +23,18 @@ class SyncService:
         log.info("Starting synchronization process...")
         
         # 1. Determine the time window
-        # User requested backfill from 2026-01-01
-        start_time_ms = int(datetime(2026, 1, 1, tzinfo=timezone.utc).timestamp() * 1000)
-        log.info(f"Forcing start date to: {datetime.fromtimestamp(start_time_ms/1000, tz=timezone.utc)}")
+        last_sync_ms = self.notion.get_last_sync_timestamp()
+        
+        # Default start date (e.g., for backfill)
+        backfill_start_ms = int(datetime(2026, 1, 1, tzinfo=timezone.utc).timestamp() * 1000)
+        
+        if last_sync_ms:
+            # Start from the second after the last sync to avoid duplicates
+            start_time_ms = max(last_sync_ms + 1, backfill_start_ms)
+            log.info(f"Last sync found at {datetime.fromtimestamp(last_sync_ms/1000, tz=timezone.utc)}. Starting from {datetime.fromtimestamp(start_time_ms/1000, tz=timezone.utc)}")
+        else:
+            start_time_ms = backfill_start_ms
+            log.info(f"No previous sync found. Forcing start date to: {datetime.fromtimestamp(start_time_ms/1000, tz=timezone.utc)}")
         
         end_time_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
 
@@ -58,10 +67,15 @@ class SyncService:
 
         log.info(f"Total transactions retrieved: {len(all_transactions)}")
 
-        # 4. Process and transform data
-        notion_records = []
-        pnl_threshold = 0.5 # Filter out tiny amounts (often residuals or funding-like dust)
+        # 4. Process and Aggregation
+        # Group by (symbol, side, tradeId_prefix) or just tradeId if available to merge split fills.
+        # Bybit Transaction Log 'tradeId' is unique for each fill. 'orderId' is unique for the order.
+        # However, a single closing order might have multiple fills.
+        # We want to aggregate fills that belong to the same "Closing Event".
+        # Simplest approach: Aggregate by 'orderId' if it exists and side/symbol match.
         
+        aggregated_data = {}
+
         for tx_record in all_transactions:
             if tx_record.get("type") != "TRADE":
                 continue
@@ -70,19 +84,63 @@ class SyncService:
             fee = float(tx_record.get("fee", 0.0))
             pnl = change + fee
             
-            # Filter non-zero and above threshold
-            if abs(pnl) < pnl_threshold:
-                continue
+            # Filter non-zero and above threshold at the individual level? 
+            # Or aggregate first then filter? Usually better to aggregate first to catch split fills that sum up to > threshold.
+            
+            order_id = tx_record.get("orderId")
+            symbol = tx_record.get("symbol")
+            side = tx_record.get("side")
+            
+            # Key for aggregation: Order ID + Symbol + Side
+            key = f"{order_id}_{symbol}_{side}"
+            
+            if key not in aggregated_data:
+                aggregated_data[key] = {
+                    "symbol": symbol,
+                    "side": side,
+                    "size": 0.0,
+                    "total_value": 0.0, # for weighted avg price
+                    "fee": 0.0,
+                    "pnl": 0.0,
+                    "timestamp": int(tx_record.get("transactionTime")),
+                    "id": order_id, # Use Order ID as the unique ID for Notion
+                    "count": 0
+                }
+            
+            agg = aggregated_data[key]
+            qty = float(tx_record.get("qty", 0.0))
+            price = float(tx_record.get("tradePrice", 0.0))
+            
+            agg["size"] += qty
+            agg["total_value"] += (qty * price)
+            agg["fee"] += fee
+            agg["pnl"] += pnl
+            # Update timestamp to the latest one in the group
+            agg["timestamp"] = max(agg["timestamp"], int(tx_record.get("transactionTime")))
+            agg["count"] += 1
 
+        notion_records = []
+        pnl_threshold = 0.5 
+
+        for key, agg in aggregated_data.items():
+            final_pnl = agg["pnl"]
+            
+            # Apply threshold filter on the AGGREGATED PnL
+            if abs(final_pnl) < pnl_threshold:
+                continue
+                
+            avg_price = agg["total_value"] / agg["size"] if agg["size"] > 0 else 0.0
+            
             record = {
-                "symbol": tx_record.get("symbol"),
-                "side": tx_record.get("side"),
-                "size": float(tx_record.get("qty", 0.0)),
-                "price": float(tx_record.get("tradePrice", 0.0)),
-                "fee": fee,
-                "pnl": pnl,
-                "timestamp": int(tx_record.get("transactionTime")),
-                "subaccount": "Main Account"
+                "symbol": agg["symbol"],
+                "side": agg["side"],
+                "size": agg["size"],
+                "price": avg_price,
+                "fee": agg["fee"],
+                "pnl": final_pnl,
+                "timestamp": agg["timestamp"],
+                "subaccount": "Main Account",
+                "id": agg["id"] 
             }
             notion_records.append(record)
 
